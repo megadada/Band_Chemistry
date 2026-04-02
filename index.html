@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>밴드 케미 분석기 (Band Chemistry)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- html2canvas 라이브러리 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', 'Noto Sans KR', sans-serif;
+            background-color: #F3F4F6;
+            color: #1F2937;
+            overflow: hidden; 
+            touch-action: none;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .scale-btn { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+        .scale-btn:active { transform: scale(0.96); }
+
+        canvas { max-width: 100%; }
+        button { touch-action: manipulation; }
+        
+        .word-keep-all { word-break: keep-all; overflow-wrap: break-word; } 
+
+        /* Input styling */
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .stat-item { min-height: 72px; }
+
+        /* Color Picker Styling */
+        input[type="color"] {
+            padding: 0;
+            border: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            cursor: pointer;
+            background: none;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: none; border-radius: 8px; }
+
+        /* Editable Text Styling */
+        .editable-name {
+            border: none;
+            background: transparent;
+            text-align: center;
+            width: 100%;
+            outline: none;
+            cursor: text;
+        }
+        .editable-name:focus {
+            box-shadow: 0 2px 0 0 currentColor;
+        }
+    </style>
+</head>
+<body class="h-[100dvh] w-screen flex items-center justify-center bg-gray-100 overflow-hidden">
+
+    <div id="app" class="w-full max-w-[420px] h-full max-h-[100dvh] sm:h-[850px] sm:max-h-[95vh] bg-white relative sm:rounded-[2rem] overflow-hidden flex flex-col shadow-2xl">
+        <!-- Content will be rendered here -->
+    </div>
+
+    <script>
+        // --- 데이터 정의 ---
+        const SESSION_DATA = {
+            'Vocal': { name: '보컬', color: '#9333ea', bg: 'bg-purple-100', axes: ['기본기', '테크닉', '이론/청음', '무대매너', '장비운용', '창작력'], icon: '🎤' },
+            'Guitar': { name: '기타', color: '#65a30d', bg: 'bg-lime-100', axes: ['피킹/리듬', '테크닉', '화성학', '솔로/표현', '톤/장비', '앙상블'], icon: '🎸' },
+            'Bass': { name: '베이스', color: '#2563eb', bg: 'bg-blue-100', axes: ['그루브', '기본기', '테크닉', '화성학', '앙상블', '톤/창작'], icon: '🎻' },
+            'Keyboard': { name: '건반', color: '#db2777', bg: 'bg-pink-100', axes: ['기본기', '화성학', '즉흥/표현', '앙상블', '장비/음색', '창작/편곡'], icon: '🎹' },
+            'Drums': { name: '드럼', color: '#ea580c', bg: 'bg-orange-100', axes: ['안정성', '그루브', '테크닉', '앙상블', '톤/튜닝', '창작/이론'], icon: '🥁' }
+        };
+
+        const TRAITS = [
+            { name: "무대 실수는 잦지만 인기몰이에 최적화 된 밴드", condition: (s) => s.performance > 70 && s.stability < 40 },
+            { name: "완벽주의자들이 모인 철두철미한 기술자 밴드", condition: (s) => s.tech > 80 && s.stability > 80 },
+            { name: "관객과의 호흡은 최고, 실력은 성장 중인 루키", condition: (s) => s.performance > 80 && s.tech < 50 },
+            { name: "창의적인 실험 정신이 돋보이는 아트 락 밴드", condition: (s) => s.creativity > 85 },
+            { name: "모든 것이 완벽한 육각형 월드 클래스 밴드", condition: (s) => s.avg > 85 },
+            { name: "기본기에 충실하여 듣기 편안한 정석 밴드", condition: (s) => s.stability > 70 && s.avg > 60 },
+            { name: "에너지가 넘치는 야생마 같은 인디 밴드", condition: (s) => s.performance > 90 && s.stability < 60 },
+            { name: "조화로운 사운드를 만드는 앙상블의 대가들", condition: (s) => s.ensemble > 80 }
+        ];
+
+        // --- 앱 상태 ---
+        let step = 'LOCK'; // 초기 단계를 잠금화면으로 설정
+        let memberCount = 3;
+        let members = [];
+        let currentMemberIndex = 0;
+        
+        // 결과 커스텀 상태
+        let bandName = "밴드 이름 기입";
+        let themeColor = '#111827'; 
+        let themeLight = 'rgba(17, 24, 39, 0.1)';
+        let themeFaded = 'rgba(17, 24, 39, 0.4)';
+        let themeGhost = 'rgba(17, 24, 39, 0.03)';
+        let isColorPickerOpen = false;
+
+        const appContainer = document.getElementById('app');
+
+        // --- 메인 렌더링 함수 ---
+        function render() {
+            appContainer.innerHTML = '';
+            if (step === 'LOCK') renderLock();
+            else if (step === 'MEMBER_COUNT') renderMemberCount();
+            else if (step === 'MEMBER_INFO') renderMemberInfo();
+            else if (step === 'RESULT') renderResult();
+        }
+
+        // 0. 잠금 화면
+        function renderLock() {
+            appContainer.innerHTML = `
+                <div class="h-full flex flex-col p-8 bg-white justify-center items-center">
+                    <div class="mb-8 text-center">
+                        <div class="inline-block p-4 rounded-full bg-gray-900 text-white mb-4">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        </div>
+                        <h1 class="text-2xl font-black text-gray-900 mb-2">Access Locked</h1>
+                        <p class="text-gray-500 text-sm">비밀번호를 입력하여 앱을 시작하세요.</p>
+                    </div>
+                    <div class="w-full max-w-[240px]">
+                        <input type="password" id="passwordInput" placeholder="Password" 
+                               class="w-full px-4 py-3 rounded-xl border-2 border-gray-100 focus:border-gray-900 outline-none text-center font-bold tracking-widest mb-4">
+                        <button onclick="checkPassword()" class="w-full py-3 rounded-xl bg-gray-900 text-white font-bold scale-btn shadow-lg">Unlock</button>
+                    </div>
+                </div>
+            `;
+            // 엔터키 입력 지원
+            document.getElementById('passwordInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') checkPassword();
+            });
+        }
+
+        function checkPassword() {
+            const input = document.getElementById('passwordInput').value;
+            if (input === 'FG889') {
+                step = 'MEMBER_COUNT';
+                render();
+            } else {
+                const btn = document.querySelector('button');
+                btn.classList.add('bg-red-500');
+                btn.innerText = 'Wrong Password';
+                setTimeout(() => {
+                    btn.classList.remove('bg-red-500');
+                    btn.innerText = 'Unlock';
+                }, 1000);
+            }
+        }
+
+        // 1. 인원 설정 화면
+        function renderMemberCount() {
+            appContainer.innerHTML = `
+                <div class="h-full flex flex-col p-8 bg-white">
+                    <div class="flex-none mb-10">
+                        <div class="flex items-center mb-4 text-gray-400">
+                            <span class="p-2 rounded-full bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+                            <span class="ml-2 font-bold text-xs tracking-widest uppercase">Member Setting</span>
+                        </div>
+                        <h1 class="text-3xl font-black text-gray-900 leading-tight word-keep-all">밴드 멤버는<br>몇 명인가요?</h1>
+                    </div>
+                    <div class="flex-1 flex flex-col justify-center space-y-4">
+                        <div class="flex items-center justify-center space-x-6 mb-10">
+                            <button onclick="changeCount(-1)" class="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center text-2xl font-bold hover:bg-gray-200">-</button>
+                            <span class="text-6xl font-black text-gray-900">${memberCount}</span>
+                            <button onclick="changeCount(1)" class="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center text-2xl font-bold hover:bg-gray-200">+</button>
+                        </div>
+                        <p class="text-center text-gray-400 text-sm mb-6 font-medium">최소 2명에서 5명까지 설정 가능합니다.</p>
+                    </div>
+                    <button onclick="startMemberInfo()" class="w-full py-5 rounded-3xl bg-gray-900 text-white font-bold text-xl scale-btn shadow-xl">다음 단계로</button>
+                </div>
+            `;
+        }
+
+        // 2. 멤버별 정보 기입 화면
+        function renderMemberInfo() {
+            const member = members[currentMemberIndex];
+            const session = SESSION_DATA[member.pos];
+
+            appContainer.innerHTML = `
+                <div class="h-full flex flex-col bg-gray-50 overflow-hidden">
+                    <div class="flex-none px-6 py-5 bg-white border-b flex justify-between items-center">
+                        <span class="font-bold text-gray-400 text-xs">Step ${currentMemberIndex + 1} / ${memberCount}</span>
+                        <h2 class="text-lg font-black">${member.name} 정보 기입</h2>
+                        <div class="w-10"></div>
+                    </div>
+                    <div class="flex-1 overflow-y-auto no-scrollbar p-6">
+                        <div class="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 mb-6">
+                            <div class="flex flex-col gap-6 mb-6">
+                                <div class="flex items-center gap-4">
+                                    <div class="relative w-20 h-20 rounded-2xl bg-gray-100 flex-none overflow-hidden border-2 border-dashed border-gray-200 flex items-center justify-center">
+                                        ${member.image ? `<img src="${member.image}" class="w-full h-full object-cover">` : `<span class="text-2xl">${session.icon}</span>`}
+                                        <input type="file" accept="image/*" onchange="handleImageUpload(this)" class="absolute inset-0 opacity-0 cursor-pointer">
+                                    </div>
+                                    <div class="flex-1">
+                                        <label class="block text-[10px] font-bold text-gray-400 mb-1 uppercase">Name</label>
+                                        <input type="text" value="${member.name}" onchange="updateMemberData('name', this.value)" 
+                                            class="w-full text-lg font-bold border-b-2 border-gray-100 focus:border-gray-900 outline-none pb-1 transition-colors">
+                                        <p class="text-[10px] text-indigo-500 font-bold mt-1 uppercase">← Tap icon to upload photo</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <label class="block text-[10px] font-bold text-gray-400 mb-3 uppercase">Position (포지션을 자유롭게 선택하세요)</label>
+                            <div class="grid grid-cols-5 gap-2">
+                                ${Object.keys(SESSION_DATA).map(key => `
+                                    <button onclick="updateMemberData('pos', '${key}')" 
+                                        class="flex flex-col items-center p-2 rounded-xl border-2 transition-all ${member.pos === key ? 'border-gray-900 bg-gray-900 text-white shadow-md' : 'border-gray-100 bg-white text-gray-400 hover:border-gray-200'}">
+                                        <span class="text-xl">${SESSION_DATA[key].icon}</span>
+                                        <span class="text-[10px] font-bold mt-1">${SESSION_DATA[key].name}</span>
+                                    </button>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+                            <h3 class="font-bold text-gray-900 mb-4 flex items-center text-sm">
+                                <span class="mr-2 text-lg">📊</span> ${session.name} 능력치 기입 (0-100)
+                            </h3>
+                            <div class="space-y-4">
+                                ${session.axes.map((axis, i) => `
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-bold text-gray-600">${axis}</span>
+                                        <div class="flex items-center space-x-3">
+                                            <input type="range" min="0" max="100" value="${member.scores[i]}" 
+                                                oninput="updateMemberScore(${i}, this.value)" class="w-24 sm:w-32 accent-gray-900">
+                                            <input type="number" min="0" max="100" value="${member.scores[i]}" 
+                                                onchange="updateMemberScore(${i}, this.value)" 
+                                                class="w-10 text-center font-bold text-gray-900 bg-gray-100 rounded-lg py-1 text-xs outline-none">
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex-none p-6 bg-white border-t flex gap-3">
+                        ${currentMemberIndex > 0 ? `<button onclick="prevMember()" class="flex-1 py-4 rounded-2xl bg-gray-100 text-gray-600 font-bold scale-btn">이전</button>` : ''}
+                        <button onclick="nextMember()" class="flex-[2] py-4 rounded-2xl bg-gray-900 text-white font-bold scale-btn shadow-lg">
+                            ${currentMemberIndex === memberCount - 1 ? '분석 결과 보기' : '다음 멤버'}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 3. 최종 결과 화면
+        function renderResult() {
+            const combinedStats = calculateBandStats();
+            const bandTrait = getBandTrait(combinedStats);
+
+            appContainer.innerHTML = `
+                <div class="h-full flex flex-col bg-gray-50 overflow-hidden">
+                    <div class="flex-none px-6 py-5 bg-white border-b flex justify-between items-center z-10">
+                        <h1 class="text-xl font-black uppercase tracking-tighter" style="color: ${themeColor}">Band Chemistry</h1>
+                        <div class="flex items-center gap-2">
+                            <button onclick="toggleColorPicker()" class="p-2 rounded-full bg-gray-100 text-gray-600 scale-btn relative">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                                ${isColorPickerOpen ? `
+                                    <div class="absolute top-12 right-0 bg-white shadow-2xl rounded-2xl p-3 border border-gray-100 flex flex-col gap-3 z-50">
+                                        <div class="flex flex-col items-center">
+                                            <span class="text-[9px] font-bold text-gray-400 mb-1">Theme</span>
+                                            <input type="color" value="${themeColor}" oninput="updateThemeColor(this.value)">
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </button>
+                            <button onclick="exportImage()" class="p-2 rounded-full bg-gray-100 text-gray-600 scale-btn">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="capture-area" class="flex-1 overflow-y-auto no-scrollbar p-6 space-y-6 bg-gray-50 pb-28">
+                        <!-- 밴드 멤버 요약 -->
+                        <div class="flex justify-center -space-x-4 mb-2">
+                            ${members.map(m => `
+                                <div class="w-16 h-16 rounded-full border-4 border-white shadow-md flex items-center justify-center overflow-hidden bg-white">
+                                    ${m.image 
+                                        ? `<img src="${m.image}" class="w-full h-full object-cover">` 
+                                        : `<div class="text-3xl ${SESSION_DATA[m.pos].bg} w-full h-full flex items-center justify-center">${SESSION_DATA[m.pos].icon}</div>`
+                                    }
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <div class="text-center px-4">
+                            <input type="text" value="${bandName}" 
+                                oninput="updateBandName(this.value)"
+                                class="editable-name text-2xl font-black leading-tight" 
+                                style="color: ${themeColor}" 
+                                placeholder="밴드 이름 기입">
+                            <p class="font-bold text-sm mt-1 uppercase" style="color: ${themeFaded}">Chemistry & Balance Radar</p>
+                        </div>
+
+                        <!-- 육각형 그래프 -->
+                        <div class="bg-white rounded-[2.5rem] p-8 shadow-sm border border-gray-100 relative overflow-hidden">
+                            <canvas id="band-chart" width="300" height="300" class="mx-auto"></canvas>
+                            <div class="mt-6 p-4 rounded-2xl border" style="background-color: ${themeGhost}; border-color: ${themeLight}">
+                                <h4 class="text-xs font-black mb-1 uppercase tracking-widest" style="color: ${themeFaded}">밴드 성격 (Trait)</h4>
+                                <p class="text-lg font-black word-keep-all leading-tight" style="color: ${themeColor}">${bandTrait}</p>
+                            </div>
+                        </div>
+
+                        <!-- 개별 멤버 리스트 -->
+                        <div class="space-y-3">
+                             <h4 class="text-xs font-black px-2 uppercase tracking-widest" style="color: ${themeFaded}">Member Stats</h4>
+                             ${members.map(m => `
+                                <div class="bg-white rounded-2xl p-4 flex items-center justify-between shadow-sm border border-gray-100 transition-all stat-item">
+                                    <div class="flex items-center">
+                                        <div class="w-12 h-12 rounded-xl overflow-hidden mr-3 flex items-center justify-center bg-gray-100 flex-none">
+                                            ${m.image 
+                                                ? `<img src="${m.image}" class="w-full h-full object-cover">` 
+                                                : `<div class="text-xl ${SESSION_DATA[m.pos].bg} w-full h-full flex items-center justify-center">${SESSION_DATA[m.pos].icon}</div>`
+                                            }
+                                        </div>
+                                        <div class="flex flex-col justify-center">
+                                            <div class="text-sm font-black leading-tight" style="color: ${themeColor}">${m.name}</div>
+                                            <div class="text-[10px] font-bold leading-tight" style="color: ${themeFaded}">${SESSION_DATA[m.pos].name}</div>
+                                        </div>
+                                    </div>
+                                    <div class="text-right flex flex-col justify-center">
+                                        <div class="text-lg font-black leading-tight" style="color:${SESSION_DATA[m.pos].color}">${Math.round(m.scores.reduce((a,b)=>a+b)/6)}</div>
+                                        <div class="text-[9px] font-bold text-gray-300 uppercase leading-tight">Avg Score</div>
+                                    </div>
+                                </div>
+                             `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="flex-none p-6 bg-white border-t absolute bottom-0 w-full z-20">
+                        <button onclick="restart()" class="w-full py-4 rounded-2xl bg-gray-900 text-white font-bold text-lg scale-btn shadow-lg">다시 시작하기</button>
+                    </div>
+                </div>
+            `;
+            
+            setTimeout(() => drawRadarChart(combinedStats), 50);
+        }
+
+        // --- 로직 함수 ---
+
+        function updateBandName(val) {
+            bandName = val;
+        }
+
+        function changeCount(val) {
+            memberCount = Math.max(2, Math.min(5, memberCount + val));
+            render();
+        }
+
+        function startMemberInfo() {
+            members = Array.from({ length: memberCount }, (_, i) => ({
+                name: `멤버 ${i + 1}`,
+                pos: 'Vocal',
+                scores: [60, 60, 60, 60, 60, 60],
+                image: ''
+            }));
+            step = 'MEMBER_INFO';
+            render();
+        }
+
+        function updateMemberData(key, val) {
+            members[currentMemberIndex][key] = val;
+            if (key === 'pos') render(); 
+        }
+
+        function handleImageUpload(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    members[currentMemberIndex].image = e.target.result;
+                    render(); 
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        function updateMemberScore(idx, val) {
+            members[currentMemberIndex].scores[idx] = parseInt(val);
+            const inputNum = document.querySelectorAll('input[type="number"]')[idx];
+            const inputRange = document.querySelectorAll('input[type="range"]')[idx];
+            if(inputNum) inputNum.value = val;
+            if(inputRange) inputRange.value = val;
+        }
+
+        function nextMember() {
+            if (currentMemberIndex < memberCount - 1) {
+                currentMemberIndex++;
+                render();
+            } else {
+                step = 'RESULT';
+                render();
+            }
+        }
+
+        function prevMember() {
+            if (currentMemberIndex > 0) {
+                currentMemberIndex--;
+                render();
+            }
+        }
+
+        function restart() {
+            step = 'MEMBER_COUNT';
+            currentMemberIndex = 0;
+            bandName = "밴드 이름 기입";
+            themeColor = '#111827';
+            themeLight = 'rgba(17, 24, 39, 0.1)';
+            themeFaded = 'rgba(17, 24, 39, 0.4)';
+            themeGhost = 'rgba(17, 24, 39, 0.03)';
+            isColorPickerOpen = false;
+            render();
+        }
+
+        function toggleColorPicker() {
+            isColorPickerOpen = !isColorPickerOpen;
+            render();
+        }
+
+        function updateThemeColor(val) {
+            themeColor = val;
+            const r = parseInt(val.slice(1, 3), 16);
+            const g = parseInt(val.slice(3, 5), 16);
+            const b = parseInt(val.slice(5, 7), 16);
+            themeLight = `rgba(${r}, ${g}, ${b}, 0.15)`;
+            themeFaded = `rgba(${r}, ${g}, ${b}, 0.5)`;
+            themeGhost = `rgba(${r}, ${g}, ${b}, 0.04)`;
+            
+            render();
+        }
+
+        function calculateBandStats() {
+            const axes = ['기술력', '안정성', '무대퍼포먼스', '창의성', '조화/앙상블', '사운드메이킹'];
+            const averages = [0, 0, 0, 0, 0, 0];
+            
+            members.forEach(m => {
+                averages[0] += m.scores[0]; 
+                averages[1] += m.scores[1]; 
+                averages[2] += m.scores[3]; 
+                averages[3] += m.scores[5]; 
+                averages[4] += m.scores[4]; 
+                averages[5] += m.scores[2]; 
+            });
+
+            const result = averages.map(v => Math.round(v / memberCount));
+            return {
+                labels: axes,
+                values: result,
+                tech: result[0],
+                stability: result[1],
+                performance: result[2],
+                creativity: result[3],
+                ensemble: result[4],
+                sound: result[5],
+                avg: result.reduce((a,b)=>a+b)/6
+            };
+        }
+
+        function getBandTrait(stats) {
+            for (let trait of TRAITS) {
+                if (trait.condition(stats)) return trait.name;
+            }
+            return "독특한 개성을 지닌 미지의 밴드";
+        }
+
+        function drawRadarChart(data) {
+            const canvas = document.getElementById('band-chart');
+            if(!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = 100;
+            const numAxes = data.labels.length;
+            const angleStep = (Math.PI * 2) / numAxes;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = themeLight;
+            ctx.lineWidth = 1;
+            for (let r = 1; r <= 5; r++) {
+                ctx.beginPath();
+                const curRadius = (radius / 5) * r;
+                for (let i = 0; i < numAxes; i++) {
+                    const x = centerX + Math.cos(i * angleStep - Math.PI/2) * curRadius;
+                    const y = centerY + Math.sin(i * angleStep - Math.PI/2) * curRadius;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                ctx.stroke();
+            }
+
+            for (let i = 0; i < numAxes; i++) {
+                const x = centerX + Math.cos(i * angleStep - Math.PI/2) * radius;
+                const y = centerY + Math.sin(i * angleStep - Math.PI/2) * radius;
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+
+                ctx.fillStyle = themeFaded;
+                ctx.font = 'bold 11px Noto Sans KR';
+                ctx.textAlign = 'center';
+                const lx = centerX + Math.cos(i * angleStep - Math.PI/2) * (radius + 25);
+                const ly = centerY + Math.sin(i * angleStep - Math.PI/2) * (radius + 15);
+                ctx.fillText(data.labels[i], lx, ly);
+            }
+
+            ctx.beginPath();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = themeColor;
+            ctx.fillStyle = themeLight;
+            for (let i = 0; i < numAxes; i++) {
+                const valRadius = (data.values[i] / 100) * radius;
+                const x = centerX + Math.cos(i * angleStep - Math.PI/2) * valRadius;
+                const y = centerY + Math.sin(i * angleStep - Math.PI/2) * valRadius;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            for (let i = 0; i < numAxes; i++) {
+                const valRadius = (data.values[i] / 100) * radius;
+                const x = centerX + Math.cos(i * angleStep - Math.PI/2) * valRadius;
+                const y = centerY + Math.sin(i * angleStep - Math.PI/2) * valRadius;
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = themeColor;
+                ctx.fill();
+            }
+        }
+
+        function exportImage() {
+            const target = document.getElementById('capture-area');
+            const clone = target.cloneNode(true);
+            
+            Object.assign(clone.style, {
+                position: 'fixed',
+                left: '-10000px',
+                top: '0',
+                width: target.offsetWidth + 'px',
+                height: target.scrollHeight + 'px',
+                overflow: 'visible',
+                background: '#F3F4F6'
+            });
+            
+            const input = clone.querySelector('.editable-name');
+            if (input) {
+                const span = document.createElement('div');
+                span.innerText = input.value || "밴드 이름";
+                span.style.cssText = window.getComputedStyle(input).cssText;
+                span.style.border = 'none';
+                span.style.boxShadow = 'none';
+                input.parentNode.replaceChild(span, input);
+            }
+
+            document.body.appendChild(clone);
+
+            const originalCanvas = target.querySelector('canvas');
+            const clonedCanvas = clone.querySelector('canvas');
+            if (originalCanvas && clonedCanvas) {
+                const ctx = clonedCanvas.getContext('2d');
+                ctx.drawImage(originalCanvas, 0, 0);
+            }
+
+            html2canvas(clone, {
+                backgroundColor: '#F3F4F6',
+                scale: 2,
+                logging: false,
+                useCORS: true,
+                allowTaint: true,
+                width: target.offsetWidth,
+                height: target.scrollHeight
+            }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = `band-chemistry-${new Date().getTime()}.png`;
+                link.href = canvas.toDataURL('image/png', 1.0);
+                link.click();
+                
+                document.body.removeChild(clone);
+            }).catch(err => {
+                console.error("Capture Error:", err);
+                if (clone.parentNode) document.body.removeChild(clone);
+            });
+        }
+
+        render();
+    </script>
+</body>
+</html>
